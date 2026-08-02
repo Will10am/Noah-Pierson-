@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Noah - Mage Épéiste 3D</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { overflow: hidden; background: #05050e; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; touch-action: none; }
+    #canvas-container { width: 100vw; height: 100vh; display: block; }
+
+    /* UI Layer Mobile */
+    .mobile-ui {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; display: flex; flex-direction: column;
+      justify-content: space-between; padding: 15px;
+    }
+
+    .top-bar {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      background: rgba(10, 10, 20, 0.7); backdrop-filter: blur(10px);
+      padding: 10px 18px; border-radius: 16px; border: 1px solid rgba(0, 240, 255, 0.3);
+      align-self: center; width: 90%; max-width: 360px;
+    }
+
+    .hero-name { color: #00f0ff; font-weight: 800; font-size: 1.1rem; letter-spacing: 1px; }
+
+    /* Target HP Bar */
+    .target-hp-container { width: 100%; height: 10px; background: #1a1a2e; border-radius: 5px; overflow: hidden; border: 1px solid #ff2a5f; }
+    .target-hp-fill { width: 100%; height: 100%; background: linear-gradient(90deg, #ff2a5f, #ff758c); transition: width 0.2s; }
+
+    /* Skill Controls under thumb */
+    .skills-panel {
+      pointer-events: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+      width: 100%; max-width: 380px; margin: 0 auto; padding-bottom: 20px;
+    }
+
+    .btn-skill {
+      height: 52px; border: none; border-radius: 14px; font-weight: 700; font-size: 0.95rem;
+      color: #fff; display: flex; align-items: center; justify-content: center; gap: 6px;
+      cursor: pointer; transition: transform 0.1s;
+    }
+
+    .btn-skill:active { transform: scale(0.94); }
+    .btn-slash { background: linear-gradient(135deg, #00b4db, #00f0ff); color: #000; box-shadow: 0 4px 15px rgba(0, 240, 255, 0.4); }
+    .btn-dash { background: linear-gradient(135deg, #11998e, #38ef7d); color: #000; box-shadow: 0 4px 15px rgba(56, 239, 125, 0.4); }
+    .btn-ult { grid-column: span 2; height: 58px; background: linear-gradient(135deg, #ff2a5f, #ff758c); box-shadow: 0 4px 20px rgba(255, 42, 95, 0.6); font-size: 1.05rem; }
+
+    /* Damage Floating Text */
+    .dmg-text {
+      position: absolute; font-weight: 900; font-size: 1.8rem; color: #ff2a5f;
+      text-shadow: 0 0 10px #ff2a5f, 2px 2px 0 #000; pointer-events: none;
+      animation: floatUp 0.6s forwards ease-out;
+    }
+
+    @keyframes floatUp {
+      0% { opacity: 1; transform: translateY(0) scale(0.8); }
+      50% { transform: translateY(-25px) scale(1.3); }
+      100% { opacity: 0; transform: translateY(-50px) scale(1); }
+    }
+  </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+  <div id="canvas-container"></div>
+
+  <div class="mobile-ui">
+    <div class="top-bar">
+      <div class="hero-name">⚔️ NOAH - MAGE ÉPÉISTE</div>
+      <div style="font-size:0.75rem; color:#aaa;">Cible : Mannequin d'Entraînement</div>
+      <div class="target-hp-container"><div class="target-hp-fill" id="hpBar"></div></div>
+    </div>
+
+    <div class="skills-panel">
+      <button class="btn-skill btn-slash" onclick="slashAttack()">🗡️ SLASH ÉCLAIR</button>
+      <button class="btn-skill btn-dash" onclick="dashSpell()">⚡ DASH MAGIQUE</button>
+      <button class="btn-skill btn-ult" onclick="ultimateSpell()">💥 ULTIME : ÉCLAIR ARCANIQUE</button>
+    </div>
+  </div>
+
+  <script>
+    // --- 1. SETUP THREE.JS ---
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x05050e, 0.03);
+
+    const aspect = window.innerWidth / window.innerHeight;
+    const camera = new THREE.PerspectiveCamera(aspect < 1 ? 75 : 60, aspect, 0.1, 1000);
+    camera.position.set(0, 6, 12);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.maxPolarAngle = Math.PI / 2 - 0.02;
+
+    // --- 2. LIGHTING ---
+    const ambLight = new THREE.AmbientLight(0x1a1a3a, 2);
+    scene.add(ambLight);
+    const pLight = new THREE.PointLight(0x00f0ff, 4, 30);
+    pLight.position.set(0, 8, 2);
+    scene.add(pLight);
+
+    // --- 3. DÉCOR & GRILLE ---
+    const grid = new THREE.GridHelper(30, 30, 0x00f0ff, 0xff2a5f);
+    grid.position.y = -0.01;
+    scene.add(grid);
+
+    // --- 4. HÉROS NOAH & ÉPÉE ENCHANTÉE ---
+    const heroGroup = new THREE.Group();
+    heroGroup.position.set(-2, 0, 0);
+    scene.add(heroGroup);
+
+    // Corps de Noah (Mannequin Stylisé Anime)
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x111625, roughness: 0.3, metalness: 0.8 });
+    const bodyGeo = new THREE.CylinderGeometry(0.4, 0.2, 1.8, 8);
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.position.y = 1.3;
+    heroGroup.add(body);
+
+    const headGeo = new THREE.SphereGeometry(0.4, 16, 16);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x0077aa });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 2.4;
+    heroGroup.add(head);
+
+    // Épée Magique Lumineuse
+    const swordGroup = new THREE.Group();
+    swordGroup.position.set(0.6, 1.4, 0.2);
+    
+    const bladeGeo = new THREE.BoxGeometry(0.1, 2.2, 0.05);
+    const bladeMat = new THREE.MeshStandardMaterial({ color: 0x00f0ff, emissive: 0x00d4ff, roughness: 0.1 });
+    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+    blade.position.y = 1.1;
+    swordGroup.add(blade);
+    heroGroup.add(swordGroup);
+
+    // Aura Électrique autour de l'épée
+    const pGeo = new THREE.BufferGeometry();
+    const pCount = 30;
+    const posArray = new Float32Array(pCount * 3);
+    for(let i=0; i<pCount*3; i++) posArray[i] = (Math.random() - 0.5) * 0.8;
+    pGeo.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+    const pMat = new THREE.PointsMaterial({ size: 0.08, color: 0x00f0ff });
+    const swordAura = new THREE.Points(pGeo, pMat);
+    swordGroup.add(swordAura);
+
+    // --- 5. CIBLE (MANNEQUIN D'ENTRAÎNEMENT) ---
+    const dummyGroup = new THREE.Group();
+    dummyGroup.position.set(2, 0, 0);
+    scene.add(dummyGroup);
+
+    const dummyMat = new THREE.MeshStandardMaterial({ color: 0xff2a5f, roughness: 0.5 });
+    const dummyBody = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.4, 1.8, 8), dummyMat);
+    dummyBody.position.y = 1.3;
+    dummyGroup.add(dummyBody);
+    let dummyHP = 100;
+
+    // --- 6. ATTAQUES & SORTS ---
+    let particles = [];
+
+    function popDamageText(text) {
+      const pop = document.createElement('div');
+      pop.className = 'dmg-text';
+      pop.innerText = text;
+      pop.style.left = (window.innerWidth / 2 + (Math.random()*40 - 20)) + 'px';
+      pop.style.top = (window.innerHeight / 2 - 80) + 'px';
+      document.body.appendChild(pop);
+      setTimeout(() => pop.remove(), 600);
+    }
+
+    function updateHP(dmg) {
+      dummyHP = Math.max(0, dummyHP - dmg);
+      document.getElementById('hpBar').style.width = dummyHP + '%';
+      if(dummyHP <= 0) setTimeout(() => { dummyHP = 100; document.getElementById('hpBar').style.width = '100%'; }, 1000);
+    }
+
+    function slashAttack() {
+      if(navigator.vibrate) navigator.vibrate(30);
+      
+      // Animation de Slash Noah
+      heroGroup.position.x = 0.8;
+      swordGroup.rotation.z = -Math.PI / 2;
+      
+      const dmg = Math.floor(18 + Math.random() * 12);
+      popDamageText(`-${dmg}`);
+      updateHP(dmg);
+
+      // Particules de coup d'épée 3D
+      for(let i=0; i<30; i++) {
+        const p = new THREE.Mesh(new THREE.SphereGeometry(0.08, 4, 4), new THREE.MeshBasicMaterial({ color: 0x00f0ff }));
+        p.position.set(2, 1.3, 0);
+        const vel = new THREE.Vector3((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
+        particles.push({ mesh: p, vel, life: 1 });
+        scene.add(p);
+      }
+
+      setTimeout(() => {
+        heroGroup.position.x = -2;
+        swordGroup.rotation.z = 0;
+      }, 180);
+    }
+
+    function dashSpell() {
+      if(navigator.vibrate) navigator.vibrate([20, 30, 20]);
+      const startX = heroGroup.position.x;
+      heroGroup.position.x = 1.5;
+
+      // Traînée d'énergie
+      for(let i=0; i<20; i++) {
+        const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: 0x38ef7d, wireframe: true }));
+        p.position.set(startX + (i*0.15), 1.2, 0);
+        particles.push({ mesh: p, vel: new THREE.Vector3(0, 0.02, 0), life: 0.8 });
+        scene.add(p);
+      }
+
+      setTimeout(() => { heroGroup.position.x = -2; }, 350);
+    }
+
+    function ultimateSpell() {
+      if(navigator.vibrate) navigator.vibrate(100);
+      
+      const dmg = Math.floor(45 + Math.random() * 20);
+      popDamageText(`💥 CRIT ${dmg}`);
+      updateHP(dmg);
+
+      // Nova d'énergie à 360°
+      for(let i=0; i<80; i++) {
+        const p = new THREE.Mesh(new THREE.SphereGeometry(0.12, 6, 6), new THREE.MeshBasicMaterial({ color: 0xff2a5f }));
+        p.position.set(2, 1.3, 0);
+        const angle = (i / 80) * Math.PI * 2;
+        const vel = new THREE.Vector3(Math.cos(angle) * 0.4, (Math.random() - 0.2) * 0.2, Math.sin(angle) * 0.4);
+        particles.push({ mesh: p, vel, life: 1.2 });
+        scene.add(p);
+      }
+    }
+
+    // --- 7. ANIMATION LOOP ---
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Flottement Noah
+      heroGroup.position.y = Math.sin(Date.now() * 0.004) * 0.15;
+      swordAura.rotation.y += 0.05;
+
+      // Update Particules
+      for(let i=particles.length-1; i>=0; i--) {
+        const p = particles[i];
+        p.mesh.position.add(p.vel);
+        p.life -= 0.03;
+        p.mesh.scale.multiplyScalar(0.95);
+        if(p.life <= 0) {
+          scene.remove(p.mesh);
+          particles.splice(i, 1);
+        }
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      const nAspect = window.innerWidth / window.innerHeight;
+      camera.aspect = nAspect;
+      camera.fov = nAspect < 1 ? 75 : 60;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+  </script>
+</body>
+  </html>
+  
